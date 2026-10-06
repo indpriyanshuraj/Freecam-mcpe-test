@@ -1,0 +1,42 @@
+name: Build Levi Freecam
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup xmake
+        uses: xmake-io/github-action-setup-xmake@v1
+
+      - uses: nttld/setup-ndk@v1
+        id: ndk
+        with:
+          ndk-version: r28c
+
+      - name: Build and package
+        run: |
+          xmake f -y -p android -a arm64-v8a -m release --ndk=${{ steps.ndk.outputs.ndk-path }}
+          xmake -y
+
+      - name: Verify build outputs
+        run: |
+          set -euxo pipefail
+          test -s build/android/arm64-v8a/release/liblevi_freecam.so
+          test -s build/android/arm64-v8a/release/levi_freecam.levipack
+          unzip -l build/android/arm64-v8a/release/levi_freecam.levipack
+          sha256sum build/android/arm64-v8a/release/liblevi_freecam.so build/android/arm64-v8a/release/levi_freecam.levipack
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: levi-freecam-1.26.52.3
+          path: |
+            build/android/arm64-v8a/release/liblevi_freecam.so
+            build/android/arm64-v8a/release/levi_freecam.levipack
+          if-no-files-found: error

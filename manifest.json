@@ -1,0 +1,8 @@
+{
+  "type": "preload-native",
+  "name": "Levi Freecam",
+  "author": "QYCottage",
+  "version": "0.2.0",
+  "entry": "liblevi_freecam.so",
+  "minecraft_versions": ["1.26.52.3"]
+}
