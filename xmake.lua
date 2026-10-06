@@ -16,6 +16,7 @@ package_end()
 
 add_requires("preloader")
 add_requires("entt v4.0.0")
+add_requires("fmt")
 
 target("levi_freecam")
     set_kind("shared")
@@ -24,7 +25,7 @@ target("levi_freecam")
     set_strip("all")
     add_files("src/main.cpp", "src/freecam.cppm")
     add_includedirs("src", {public = false})
-    add_packages("preloader", "entt")
+    add_packages("preloader", "entt", "fmt")
 
     if is_plat("android") then
         add_cxflags(

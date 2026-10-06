@@ -2,6 +2,8 @@
 set -euo pipefail
 
 MODE="${1:-release}"
+export COLORTERM="${COLORTERM:-truecolor}"
+export TERM="${TERM:-xterm-256color}"
 NDK="${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-}}"
 
 if [[ -z "$NDK" ]]; then

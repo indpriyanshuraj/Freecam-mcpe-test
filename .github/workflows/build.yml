@@ -10,7 +10,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup xmake
         uses: xmake-io/github-action-setup-xmake@v1
@@ -21,6 +21,9 @@ jobs:
           ndk-version: r28c
 
       - name: Build and package
+        env:
+          COLORTERM: truecolor
+          TERM: xterm-256color
         run: |
           xmake f -y -p android -a arm64-v8a -m release --ndk=${{ steps.ndk.outputs.ndk-path }}
           xmake -y
@@ -33,7 +36,7 @@ jobs:
           unzip -l build/android/arm64-v8a/release/levi_freecam.levipack
           sha256sum build/android/arm64-v8a/release/liblevi_freecam.so build/android/arm64-v8a/release/levi_freecam.levipack
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: levi-freecam-1.26.52.3
           path: |
