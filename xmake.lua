@@ -60,5 +60,6 @@ target("levi_freecam")
             "--mod-id", "levi_freecam",
             "--output", output
         })
-        print("Levipack: " .. output)
+        print("[levi-freecam] packaged: " .. output)
+        print("[levi-freecam] native library: " .. target:targetfile())
     end)

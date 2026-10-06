@@ -33,8 +33,10 @@ def main() -> int:
 
     output.parent.mkdir(parents=True, exist_ok=True)
     with ZipFile(output, "w", ZIP_DEFLATED) as package:
-        package.write(library, f"{args.mod_id}/{entry}")
-        package.write(manifest, f"{args.mod_id}/manifest.json")
+        # LeviLaunchroid expects manifest.json and the entry library at the
+        # package root. The mod directory is created by the launcher on import.
+        package.write(library, entry)
+        package.write(manifest, "manifest.json")
 
     print(output)
     return 0

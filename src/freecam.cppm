@@ -6,6 +6,8 @@ module;
 #include <cstddef>
 #include <cstring>
 #include <link.h>
+#include <chrono>
+#include <thread>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -248,34 +250,19 @@ public:
             return false;
         }
 
-        auto& logger = mNativeMod->getLogger();
-        logger.info("Loading Freecam {}", kMinecraftVersion);
-
-        mTarget = findTargetImage();
-        if (!mTarget.base || !mTarget.buildIdValid) {
-            logger.error("Minecraft Build ID mismatch; expected 1.26.52.3 build 56de9eed...71d335");
-            return false;
-        }
-
-        if (!validateClientInstanceVtable(mTarget)) {
-            logger.error("ClientInstance ABI validation failed; refusing to hook");
-            return false;
-        }
-
-        auto* target = reinterpret_cast<void*>(mTarget.base + TargetLayout::update);
-        mUpdateHook = pl::memory::HookHandle(
-            target,
-            reinterpret_cast<void*>(&updateDetour),
-            reinterpret_cast<void**>(&g_originalUpdate),
-            pl::memory::HookPriority::High);
-
-        if (!mUpdateHook.installed() || !g_originalUpdate) {
-            logger.error("Failed to hook ClientInstance::update");
-            return false;
-        }
-
         g_mod = this;
+        mNativeMod->getLogger().info("Freecam {} loaded; waiting for Minecraft", kMinecraftVersion);
+        // LeviLaunchroid loads native mods before libminecraftpe.so is necessarily
+        // present. Runtime hook installation therefore cannot be a load() failure.
+        return true;
+    }
 
+    bool enable() {
+        if (!mNativeMod) {
+            return false;
+        }
+
+        auto& logger = mNativeMod->getLogger();
         pl::modmenu::ModuleInfo module{};
         module.moduleId = std::string{kModuleId};
         module.displayName = "Freecam";
@@ -289,21 +276,14 @@ public:
         };
 
         if (!pl::modmenu::registerModule(module)) {
-            logger.error("Failed to register Freecam with Mod Menu");
-            g_mod = nullptr;
-            mUpdateHook.reset();
+            logger.error("Mod Menu registration failed");
             return false;
         }
 
-        // Some ModMenu versions do not invoke onToggle for defaultEnabled. Make the
-        // initial module state deterministic without relying on that detail.
         setMenuEnabled(true);
+        startRuntimeWatcher();
+        logger.info("Freecam enabled; waiting for ClientInstance::update hook");
         return true;
-    }
-
-    bool enable() {
-        // Native mod lifecycle enable is separate from the ModMenu Freecam toggle.
-        return mNativeMod != nullptr && mUpdateHook.installed();
     }
 
     bool disable() {
@@ -315,6 +295,7 @@ public:
 
     bool unload() {
         request(false);
+        stopRuntimeWatcher();
         pl::modmenu::unregisterButton(kButtonId);
         pl::modmenu::unregisterModule(kModuleId);
         mMenuEnabled.store(false, std::memory_order_release);
@@ -346,6 +327,78 @@ public:
     }
 
 private:
+    void startRuntimeWatcher() {
+        bool expected = false;
+        if (!mWatcherRunning.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
+            return;
+        }
+        mStopWatcher.store(false, std::memory_order_release);
+        mWatcher = std::thread([this] {
+            for (;;) {
+                if (mStopWatcher.load(std::memory_order_acquire)) {
+                    return;
+                }
+                if (installRuntimeHook()) {
+                    return;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+        });
+    }
+
+    bool installRuntimeHook() {
+        if (mUpdateHook.installed()) {
+            return true;
+        }
+
+        mTarget = findTargetImage();
+        if (!mTarget.base) {
+            return false;
+        }
+        if (!mTarget.buildIdValid) {
+            if (!mLoggedBuildMismatch.exchange(true, std::memory_order_acq_rel) && mNativeMod) {
+                mNativeMod->getLogger().error(
+                    "Minecraft Build ID mismatch; expected 1.26.52.3 (56de9eed...71d335)");
+            }
+            return false;
+        }
+        if (!validateClientInstanceVtable(mTarget)) {
+            if (!mLoggedAbiMismatch.exchange(true, std::memory_order_acq_rel) && mNativeMod) {
+                mNativeMod->getLogger().error("ClientInstance ABI validation failed; hook skipped");
+            }
+            return false;
+        }
+
+        auto* target = reinterpret_cast<void*>(mTarget.base + TargetLayout::update);
+        mUpdateHook = pl::memory::HookHandle(
+            target,
+            reinterpret_cast<void*>(&updateDetour),
+            reinterpret_cast<void**>(&g_originalUpdate),
+            pl::memory::HookPriority::High);
+
+        if (!mUpdateHook.installed() || !g_originalUpdate) {
+            if (!mLoggedHookFailure.exchange(true, std::memory_order_acq_rel) && mNativeMod) {
+                mNativeMod->getLogger().error("ClientInstance::update hook installation failed");
+            }
+            mUpdateHook.reset();
+            g_originalUpdate = nullptr;
+            return false;
+        }
+
+        if (mNativeMod) {
+            mNativeMod->getLogger().info("ClientInstance::update hook installed");
+        }
+        return true;
+    }
+
+    void stopRuntimeWatcher() {
+        mStopWatcher.store(true, std::memory_order_release);
+        if (mWatcher.joinable()) {
+            mWatcher.join();
+        }
+        mWatcherRunning.store(false, std::memory_order_release);
+    }
+
     bool onClientUpdateImpl(void* clientInstance) {
         if (!clientInstance) {
             return false;
@@ -490,6 +543,12 @@ private:
     ll::mod::NativeMod* mNativeMod{};
     TargetImage mTarget{};
     pl::memory::HookHandle mUpdateHook{};
+    std::thread mWatcher{};
+    std::atomic_bool mWatcherRunning{false};
+    std::atomic_bool mStopWatcher{false};
+    std::atomic_bool mLoggedBuildMismatch{false};
+    std::atomic_bool mLoggedAbiMismatch{false};
+    std::atomic_bool mLoggedHookFailure{false};
 
     std::atomic_bool mMenuEnabled{false};
     std::atomic_bool mRequested{false};

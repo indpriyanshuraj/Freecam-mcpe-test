@@ -39,8 +39,12 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with:
-          name: levi-freecam-1.26.52.3
-          path: |
-            build/android/arm64-v8a/release/liblevi_freecam.so
-            build/android/arm64-v8a/release/levi_freecam.levipack
+          name: levi-freecam-1.26.52.3-so
+          path: build/android/arm64-v8a/release/liblevi_freecam.so
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: levi-freecam-1.26.52.3-levipack
+          path: build/android/arm64-v8a/release/levi_freecam.levipack
           if-no-files-found: error

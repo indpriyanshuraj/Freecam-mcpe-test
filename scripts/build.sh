@@ -2,8 +2,6 @@
 set -euo pipefail
 
 MODE="${1:-release}"
-export COLORTERM="${COLORTERM:-truecolor}"
-export TERM="${TERM:-xterm-256color}"
 NDK="${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-}}"
 
 if [[ -z "$NDK" ]]; then
@@ -13,5 +11,26 @@ fi
 
 export XMAKE_COLORTERM="${XMAKE_COLORTERM:-truecolor}"
 
+echo "== Levi Freecam build =="
+echo "Mode : $MODE"
+echo "ABI  : arm64-v8a"
+echo "NDK  : $NDK"
+echo
+
+echo "[1/3] Configuring Xmake..."
 xmake f -y -p android -a arm64-v8a -m "$MODE" --ndk="$NDK"
+
+echo "[2/3] Building native library..."
 xmake -y
+
+OUT="build/android/arm64-v8a/$MODE"
+SO="$OUT/liblevi_freecam.so"
+PACK="$OUT/levi_freecam.levipack"
+
+echo "[3/3] Verifying outputs..."
+test -s "$SO"
+test -s "$PACK"
+echo "  SO      : $SO"
+echo "  Levipack: $PACK"
+echo
+echo "Build complete."
