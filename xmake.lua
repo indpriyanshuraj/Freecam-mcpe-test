@@ -23,7 +23,7 @@ target("levi_freecam")
     set_runtimes("c++_shared")
     set_languages("c++23")
     set_strip("all")
-    add_files("src/main.cpp", "src/freecam.cppm")
+    add_files("src/freecam.cppm")
     add_includedirs("src", {public = false})
     add_packages("preloader", "entt", "fmt")
 

@@ -14,6 +14,8 @@ jobs:
 
       - name: Setup xmake
         uses: xmake-io/github-action-setup-xmake@v1
+        with:
+          xmake-version: latest
 
       - uses: nttld/setup-ndk@v1
         id: ndk
@@ -22,8 +24,7 @@ jobs:
 
       - name: Build and package
         env:
-          COLORTERM: truecolor
-          TERM: xterm-256color
+          XMAKE_COLORTERM: truecolor
         run: |
           xmake f -y -p android -a arm64-v8a -m release --ndk=${{ steps.ndk.outputs.ndk-path }}
           xmake -y

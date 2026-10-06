@@ -11,5 +11,7 @@ if [[ -z "$NDK" ]]; then
     exit 1
 fi
 
+export XMAKE_COLORTERM="${XMAKE_COLORTERM:-truecolor}"
+
 xmake f -y -p android -a arm64-v8a -m "$MODE" --ndk="$NDK"
 xmake -y

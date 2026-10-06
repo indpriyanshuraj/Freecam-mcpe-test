@@ -82,7 +82,7 @@ No BedrockTools library, headers, API, or runtime bridge are used.
 
 ## C++23 modules
 
-The implementation uses `src/freecam.cppm` as a C++23 module interface and `src/main.cpp` imports it. Xmake's C++ module dependency analysis is enabled explicitly.
+The implementation uses `src/freecam.cppm` as a C++23 module interface. Mod registration is emitted from that same module unit, avoiding a second translation unit that imports the module and then re-includes Preloader headers. Xmake's C++ module dependency analysis is enabled explicitly.
 
 ## Important runtime behavior
 

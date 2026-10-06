@@ -552,3 +552,8 @@ bool FreecamMod::unload() {
 }
 
 } // namespace levi_freecam
+
+// Keep registration in this module unit. A separate TU that imports this module
+// and then includes pl/Mod.hpp triggers a known Clang/libc++ global-module-fragment
+// ODR diagnostic with the Android NDK libc++ headers.
+PL_REGISTER_MOD(levi_freecam::FreecamMod, levi_freecam::FreecamMod::instance());
