@@ -57,13 +57,18 @@ Clean:
 bash scripts/build.sh clean
 ```
 
-The output is `build/out/liblevi_freecam.levipack`. Build logs are written under `build/logs/`.
+The release output directory is `build/android/arm64-v8a/release/` and contains:
+
+- `liblevi_freecam.so`
+- `levi_freecam.levipack`
+
+The build script prints the major build/package phases without forcing verbose compiler-command output.
 
 ## GitHub Actions
 
 The repository includes `.github/workflows/build.yml`. Every push to `main`/`master` and every pull request builds the Android `arm64-v8a` release using the same Xmake commands used locally. The workflow follows the BedrockTools build pattern: setup Xmake, setup Android NDK r28c, configure with `xmake f`, then build/package with `xmake`.
 
-The workflow verifies the produced library and Levipack before uploading both artifacts.
+The workflow verifies the produced library and Levipack before uploading them as two separate GitHub Actions artifacts: one `.so` artifact and one `.levipack` artifact.
 
 ## Dependencies
 
@@ -86,7 +91,7 @@ The implementation uses `src/freecam.cppm` as a C++23 module interface. Mod regi
 
 ## Important runtime behavior
 
-The Freecam ModMenu module is enabled by default and creates a HUD toggle button. Disabling that module removes the button and requests native debug-camera shutdown.
+The Freecam ModMenu module is enabled by default. It exposes an `Enabled` toggle setting whose default is `true`; this controls the native free-camera request. A separate HUD toggle button controls the same runtime request. The HUD button is an SVG-only sharp `F` icon with a transparent interior/background; the text label is hidden. Disabling the module removes the button and requests native debug-camera shutdown.
 
 The mod automatically disables Freecam when the local player or its ECS registry changes, preventing state from leaking across world/dimension/player replacement.
 
@@ -94,7 +99,7 @@ If vanilla/native debug camera was already active before this mod enabled, the m
 
 ## Remaining runtime validation
 
-The binary RE is complete enough to eliminate BedrockTools and use the native ECS trigger directly. The remaining test that requires a real Android client is behavioral: verify that the native `DebugCameraIsActiveComponent` activation path causes the expected free-camera input mode on the exact installed 1.26.52.3 build, including mobile touch controls, and verify restoration while walking, riding, swimming, falling, and creative flying.
+The binary RE is complete enough to eliminate BedrockTools and use the native ECS trigger directly. The exact ClientInstance signatures are also checked byte-for-byte against the BedrockTools signatures on the supplied ELF. The remaining test that requires a real Android client is behavioral: verify that the native `DebugCameraIsActiveComponent` activation path causes the expected free-camera input mode on the exact installed 1.26.52.3 build, including mobile touch controls, and verify restoration while walking, riding, swimming, falling, and creative flying.
 
 ## Optional target verification
 

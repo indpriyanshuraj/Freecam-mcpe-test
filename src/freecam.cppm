@@ -224,12 +224,12 @@ Registry* registryFromPlayer(void* player) noexcept {
 
 constexpr std::string_view kFreecamSvg = R"svg(
 <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
-  <path fill="#E0E0E0" stroke="#333333" stroke-width="3" d="M8 14h48v36H8z"/>
-  <path fill="#777777" d="M14 20h36v24H14z"/>
-  <circle cx="32" cy="32" r="8" fill="#222222"/>
-  <path fill="#222222" d="M32 6l4 8h-8l4-8zM58 32l-8 4v-8l8 4zM32 58l-4-8h8l-4 8zM6 32l8-4v8l-8-4z"/>
+  <rect x="6" y="6" width="52" height="52" rx="5" fill="none" stroke="#FFFFFF" stroke-width="4"/>
+  <path fill="#FFFFFF" d="M21 17h25v6H27v8h17v6H27v10h-6V17z"/>
 </svg>
 )svg";
+
+constexpr std::string_view kFreecamActiveSvg = kFreecamSvg;
 
 class FreecamModImpl;
 FreecamModImpl* g_mod = nullptr;
@@ -271,8 +271,26 @@ public:
         module.modId = mNativeMod->getId();
         module.defaultEnabled = true;
         module.hideInHudEditor = false;
+        module.configs.push_back(pl::modmenu::ConfigEntry{
+            .key = "enabled",
+            .displayName = "Enabled",
+            .type = pl::modmenu::ConfigType::Toggle,
+            .defaultValue = "true",
+        });
         module.onToggle = [this](std::string_view, bool enabled) {
             setMenuEnabled(enabled);
+        };
+        module.onConfigChanged = [this](std::string_view, std::string_view key,
+                                        std::string_view value) {
+            if (key != "enabled") {
+                return;
+            }
+            const bool enabled = value == "true" || value == "1";
+            mConfigEnabled.store(enabled, std::memory_order_release);
+            request(mMenuEnabled.load(std::memory_order_acquire) && enabled);
+            if (mNativeMod) {
+                mNativeMod->getLogger().info("Freecam setting: enabled = {}", enabled);
+            }
         };
 
         if (!pl::modmenu::registerModule(module)) {
@@ -305,6 +323,7 @@ public:
         mNativeMod = nullptr;
         mTarget = {};
         mOwnedRegistry = nullptr;
+        mLastRegistry = nullptr;
         mOwnedActive = false;
         mBoundPlayer = nullptr;
         return true;
@@ -466,6 +485,13 @@ private:
             return false;
         }
 
+        if (mBoundPlayer != player || mLastRegistry != registry) {
+            if (mNativeMod) {
+                mNativeMod->getLogger().info("Freecam bound to local-player ECS registry");
+            }
+            mLastRegistry = registry;
+        }
+
         auto& globals = registry->ctx();
         using DebugCameraState = DebugCameraIsActiveComponent;
 
@@ -474,6 +500,9 @@ private:
                 // Only erase state this mod inserted. If vanilla or another mod already
                 // owned the component, leaving it untouched is required for correctness.
                 globals.erase<DebugCameraState>();
+                if (mNativeMod) {
+                    mNativeMod->getLogger().info("Freecam debug-camera state removed");
+                }
             }
             mOwnedActive = false;
             mOwnedRegistry = nullptr;
@@ -485,6 +514,9 @@ private:
             globals.emplace<DebugCameraState>();
             mOwnedActive = true;
             mOwnedRegistry = registry;
+            if (mNativeMod) {
+                mNativeMod->getLogger().info("Freecam debug-camera state enabled");
+            }
         } else {
             // Vanilla/native debug camera is already active. Do not claim ownership and
             // never remove another owner’s component when this mod is disabled.
@@ -504,11 +536,20 @@ private:
 
     void setMenuEnabled(bool enabled) {
         mMenuEnabled.store(enabled, std::memory_order_release);
-        request(false);
+        request(enabled && mConfigEnabled.load(std::memory_order_acquire));
         pl::modmenu::unregisterButton(kButtonId);
 
         if (!enabled) {
+            if (mNativeMod) {
+                mNativeMod->getLogger().info("Freecam module disabled");
+            }
             return;
+        }
+
+        if (mNativeMod) {
+            mNativeMod->getLogger().info(
+                "Freecam module enabled; Freecam setting = {}",
+                mConfigEnabled.load(std::memory_order_acquire));
         }
 
         pl::modmenu::ButtonInfo button{};
@@ -516,23 +557,29 @@ private:
         button.moduleId = std::string{kModuleId};
         button.displayName = "Freecam";
         button.modId = mNativeMod ? mNativeMod->getId() : std::string{};
-        button.label = "Freecam";
+        button.label.clear();
         button.behavior = pl::modmenu::ButtonBehavior::Toggle;
         button.defaultVisible = true;
         button.stylePreset = pl::modmenu::ButtonStylePreset::Accent;
         button.widthScale = 1.0f;
         button.heightScale = 1.0f;
         button.iconFormat = pl::modmenu::ButtonIconFormat::Svg;
-        button.hideLabelWhenIconPresent = false;
+        button.hideLabelWhenIconPresent = true;
 
         const auto* svg = reinterpret_cast<const unsigned char*>(kFreecamSvg.data());
         button.iconData.assign(svg, svg + kFreecamSvg.size());
+        const auto* activeSvg = reinterpret_cast<const unsigned char*>(kFreecamActiveSvg.data());
+        button.activeIconData.assign(activeSvg, activeSvg + kFreecamActiveSvg.size());
 
         button.onEvent = [this](std::string_view, pl::modmenu::ButtonEvent event, float value) {
             if (event != pl::modmenu::ButtonEvent::StateChanged) {
                 return;
             }
-            request(value > 0.5f);
+            const bool enabled = value > 0.5f;
+            request(enabled && mConfigEnabled.load(std::memory_order_acquire));
+            if (mNativeMod) {
+                mNativeMod->getLogger().info("Freecam button: {}", enabled ? "ON" : "OFF");
+            }
         };
 
         if (!pl::modmenu::registerButton(button) && mNativeMod) {
@@ -551,9 +598,11 @@ private:
     std::atomic_bool mLoggedHookFailure{false};
 
     std::atomic_bool mMenuEnabled{false};
+    std::atomic_bool mConfigEnabled{true};
     std::atomic_bool mRequested{false};
 
     Registry* mOwnedRegistry{};
+    Registry* mLastRegistry{};
     void* mBoundPlayer{};
     bool mOwnedActive{};
 };

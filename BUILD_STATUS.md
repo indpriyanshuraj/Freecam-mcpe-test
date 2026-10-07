@@ -18,3 +18,10 @@ The previous CI failure was not an NDK-path failure. The compiler was invoked su
 `fmt::format.h:747:28: error: use of undeclared identifier 'malloc'`
 
 BedrockTools currently uses the preloader `main` package recipe and NDK r28c. The project now adopts those dependency/toolchain choices instead of adding custom compiler or NDK path handling.
+
+
+## Runtime/UI review
+
+The successful-load build was reviewed against the supplied `1.26.52.3` ELF. The BedrockTools `ClientInstanceUpdate` and `ClientInstanceGetLocalPlayer` signature patterns both match the exact target bytes, and the ClientInstance vtable relocations point to the same RVAs.
+
+The ModMenu implementation now has an explicit `Enabled` toggle config (default `true`), a Toggle HUD button using a transparent SVG `F`, and transition-only diagnostics for button/config/ECS activation.
