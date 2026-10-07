@@ -1,27 +1,31 @@
 # Build status
 
-## Build architecture
+Target: Minecraft Bedrock Android `1.26.52.3`
 
-This project intentionally follows the proven BedrockTools build architecture rather than copying its project files:
+Target ELF Build ID:
 
-- Xmake is the project build system.
-- GitHub Actions installs Xmake with the official Xmake setup action.
-- `nttld/setup-ndk` supplies the Android NDK and its reported `ndk-path` is passed directly to Xmake.
-- The preloader package is built from its current `main` branch, matching the dependency choice used by BedrockTools.
-- EnTT is pinned to v4.0.0 because the Freecam implementation depends on its current `EntityId`/registry integration.
-- The mod keeps its own C++23 module source, RE validation, lifecycle handling, and Levipack packaging.
+`56de9eed077631e03a31f4f58eb2f0e00071d335`
 
-## CI diagnosis
+## Verified target gate
 
-The previous CI failure was not an NDK-path failure. The compiler was invoked successfully from NDK r30 and the failure occurred while building the **old pinned preloader 0.2.3** dependency:
+- `ClientInstance::update(bool)` exact signature: `0x098036A4`
+- `ClientInstance::getLocalPlayer() const` exact signature: `0x09808050`
+- `ClientInstance` RTTI name: `14ClientInstance`
+- ClientInstance vtable relocations: verified
+- exact Build ID: verified
 
-`fmt::format.h:747:28: error: use of undeclared identifier 'malloc'`
+## Current runtime strategy
 
-BedrockTools currently uses the preloader `main` package recipe and NDK r28c. The project now adopts those dependency/toolchain choices instead of adding custom compiler or NDK path handling.
+1. Native mod loads without requiring `libminecraftpe.so` to already exist.
+2. A runtime watcher waits for the exact target library.
+3. Build ID and ClientInstance RTTI/vtable are checked before the hook is installed.
+4. `IClientInstance::update(bool)` is hooked.
+5. The live ClientInstance vtable is rechecked before processing.
+6. `getLocalPlayer()` resolves the current local player.
+7. The player's `EntityContext` is mirrored at `Actor + 0x08`.
+8. The EnTT registry is obtained from `EntityContext::mEnTTRegistry`.
+9. The mod requests `DebugCameraIsActiveComponent` in the registry context without changing GameType or teleporting the player.
 
+## Important limitation
 
-## Runtime/UI review
-
-The successful-load build was reviewed against the supplied `1.26.52.3` ELF. The BedrockTools `ClientInstanceUpdate` and `ClientInstanceGetLocalPlayer` signature patterns both match the exact target bytes, and the ClientInstance vtable relocations point to the same RVAs.
-
-The ModMenu implementation now has an explicit `Enabled` toggle config (default `true`), a Toggle HUD button using a transparent SVG `F`, and transition-only diagnostics for button/config/ECS activation.
+The native component path is RE-backed but still requires real-device behavioral confirmation that the exact `1.26.52.3` debug-camera systems consume only this global state for the desired freecam behavior. The new debug module is intended to distinguish a UI/request/hook/ECS failure from a camera-state implementation failure.

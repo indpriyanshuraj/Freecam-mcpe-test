@@ -3,8 +3,12 @@ name: Build Levi Freecam
 on:
   push:
     branches: [main, master]
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -26,10 +30,11 @@ jobs:
         env:
           XMAKE_COLORTERM: truecolor
         run: |
+          set -euxo pipefail
           xmake f -y -p android -a arm64-v8a -m release --ndk=${{ steps.ndk.outputs.ndk-path }}
           xmake -y
 
-      - name: Verify build outputs
+      - name: Verify outputs
         run: |
           set -euxo pipefail
           test -s build/android/arm64-v8a/release/liblevi_freecam.so
@@ -37,14 +42,34 @@ jobs:
           unzip -l build/android/arm64-v8a/release/levi_freecam.levipack
           sha256sum build/android/arm64-v8a/release/liblevi_freecam.so build/android/arm64-v8a/release/levi_freecam.levipack
 
-      - uses: actions/upload-artifact@v7
+      - name: Upload CI artifacts
+        uses: actions/upload-artifact@v7
         with:
-          name: levi-freecam-1.26.52.3-so
-          path: build/android/arm64-v8a/release/liblevi_freecam.so
+          name: levi-freecam-1.26.52.3
+          path: |
+            build/android/arm64-v8a/release/levi_freecam.levipack
+            build/android/arm64-v8a/release/liblevi_freecam.so
           if-no-files-found: error
 
-      - uses: actions/upload-artifact@v7
-        with:
-          name: levi-freecam-1.26.52.3-levipack
-          path: build/android/arm64-v8a/release/levi_freecam.levipack
-          if-no-files-found: error
+      - name: Publish .levipack release asset
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euxo pipefail
+          gh release create "${GITHUB_REF_NAME}" \
+            build/android/arm64-v8a/release/levi_freecam.levipack \
+            build/android/arm64-v8a/release/liblevi_freecam.so \
+            --title "Levi Freecam ${GITHUB_REF_NAME}" \
+            --generate-notes
+
+      - name: Print direct download link
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          echo "Direct .levipack download:"
+          echo "${{ github.server_url }}/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}/levi_freecam.levipack"
+          {
+            echo '### Levi Freecam download'
+            echo
+            echo "[Download levi_freecam.levipack](${{ github.server_url }}/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}/levi_freecam.levipack)"
+          } >> "$GITHUB_STEP_SUMMARY"

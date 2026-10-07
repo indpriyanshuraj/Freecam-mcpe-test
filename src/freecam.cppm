@@ -1,19 +1,11 @@
 module;
 
-#include <array>
 #include <atomic>
-#include <cstdint>
-#include <cstddef>
-#include <cstring>
-#include <link.h>
 #include <chrono>
-#include <thread>
+#include <cstdint>
 #include <string>
 #include <string_view>
-#include <type_traits>
-#include <utility>
-
-#include <entt/entt.hpp>
+#include <thread>
 
 #include <pl/Mod.hpp>
 #include <pl/ModMenu.hpp>
@@ -21,206 +13,18 @@ module;
 
 export module levi.freecam;
 
-// -----------------------------------------------------------------------------
-// Exact 1.26.52.3 Bedrock ECS mirror.
-//
-// These declarations intentionally mirror only ABI facts required by this mod.
-// They are not replacements for the full LeviLamina SDK.
-// -----------------------------------------------------------------------------
-
-enum class EntityId : std::uint32_t {};
-
-struct EntityIdTraits {
-    using value_type = EntityId;
-    using entity_type = std::uint32_t;
-    using version_type = std::uint16_t;
-    static constexpr entity_type entity_mask = 0x3FFFF;
-    static constexpr entity_type version_mask = 0x3FFF;
-};
-
-namespace entt::internal {
-
-template <>
-struct entt_traits<::EntityId> : ::EntityIdTraits {};
-
-} // namespace entt::internal
-
-// LeviLamina 26.x EntityContext has two pointer-sized reference members followed
-// by EntityId. References are represented as pointers in the AArch64 ABI.
-struct EntityContextMirror {
-    std::uintptr_t mRegistry{};
-    std::uintptr_t mEnTTRegistry{};
-    EntityId mEntity{};
-};
-
-struct DebugCameraIsActiveComponent {};
-
-static_assert(sizeof(EntityId) == sizeof(std::uint32_t));
-static_assert(sizeof(EntityContextMirror) == 0x18);
-static_assert(offsetof(EntityContextMirror, mEnTTRegistry) == 0x08);
-static_assert(offsetof(EntityContextMirror, mEntity) == 0x10);
-static_assert(
-    entt::type_hash<DebugCameraIsActiveComponent>::value() == 0x25D8BF40u,
-    "The compiler/EnTT type-name ABI does not match Bedrock 1.26.52.3");
+import levi.freecam.debug;
+import levi.freecam.target;
+import levi.freecam.ecs;
 
 namespace {
 
-using Registry = entt::basic_registry<EntityId>;
 using UpdateFn = bool (*)(void*, bool);
 using GetLocalPlayerFn = void* (*)(void*);
 
-constexpr std::string_view kMinecraftVersion = "1.26.52.3";
-constexpr std::string_view kMinecraftLibrary = "libminecraftpe.so";
 constexpr std::string_view kModuleId = "levi_freecam.Freecam";
 constexpr std::string_view kButtonId = "levi_freecam.Freecam.Button";
-
-// GNU Build ID from the supplied libminecraftpe-v1.26.52.3.so.xz.
-constexpr std::array<std::uint8_t, 20> kBuildId{
-    0x56, 0xde, 0x9e, 0xed, 0x07, 0x76, 0x31, 0xe0, 0x3a, 0x31,
-    0xf4, 0xf5, 0x8e, 0xb2, 0xf0, 0x2e, 0x00, 0x07, 0x1d, 0x33};
-
-// All addresses below are RVAs from the ELF load bias (base address). They were
-// verified against the supplied 1.26.52.3 AArch64 client.
-struct TargetLayout {
-    static constexpr std::uintptr_t clientInstanceVtable = 0x12BC3300;
-    static constexpr std::uintptr_t clientInstanceTypeInfo = 0x12BC42B8;
-    static constexpr std::uintptr_t clientInstanceTypeName = 0x02BE2BEB;
-
-    // IClientInstance Itanium vtable slots, with two destructor entries counted.
-    static constexpr std::size_t updateVtableSlot = 25;
-    static constexpr std::size_t localPlayerVtableSlot = 32;
-
-    static constexpr std::uintptr_t update = 0x098036A4;
-    static constexpr std::uintptr_t localPlayer = 0x09808050;
-
-    static constexpr std::uintptr_t actorEntityContextOffset = 0x08;
-};
-
-struct TargetImage {
-    std::uintptr_t base{};
-    bool buildIdValid{};
-};
-
-constexpr std::size_t align4(std::size_t value) noexcept {
-    return (value + 3u) & ~std::size_t{3u};
-}
-
-bool inspectBuildId(const dl_phdr_info* info, TargetImage& result) {
-    if (!info || !info->dlpi_name) {
-        return false;
-    }
-
-    const std::string_view path{info->dlpi_name};
-    const std::size_t slash = path.find_last_of('/');
-    const std::string_view basename = path.substr(slash == std::string_view::npos ? 0 : slash + 1);
-    if (basename != kMinecraftLibrary) {
-        return false;
-    }
-
-    result.base = static_cast<std::uintptr_t>(info->dlpi_addr);
-
-    for (std::uint16_t index = 0; index < info->dlpi_phnum; ++index) {
-        const auto& phdr = info->dlpi_phdr[index];
-        if (phdr.p_type != PT_NOTE || phdr.p_filesz < sizeof(Elf64_Nhdr)) {
-            continue;
-        }
-
-        const auto* noteBase = reinterpret_cast<const std::uint8_t*>(
-            static_cast<std::uintptr_t>(info->dlpi_addr) + phdr.p_vaddr);
-        const std::size_t limit = static_cast<std::size_t>(phdr.p_filesz);
-        std::size_t offset = 0;
-
-        while (offset + sizeof(Elf64_Nhdr) <= limit) {
-            const auto* note = reinterpret_cast<const Elf64_Nhdr*>(noteBase + offset);
-            offset += sizeof(Elf64_Nhdr);
-
-            const std::size_t nameSize = align4(note->n_namesz);
-            const std::size_t descSize = align4(note->n_descsz);
-            if (nameSize > limit - offset || descSize > limit - offset - nameSize) {
-                break;
-            }
-
-            const auto* name = noteBase + offset;
-            const auto* description = name + nameSize;
-
-            if (note->n_type == NT_GNU_BUILD_ID && note->n_namesz >= 3 &&
-                std::memcmp(name, "GNU", 3) == 0 && note->n_descsz == kBuildId.size() &&
-                std::memcmp(description, kBuildId.data(), kBuildId.size()) == 0) {
-                result.buildIdValid = true;
-                return true;
-            }
-
-            offset += nameSize + descSize;
-        }
-    }
-
-    return true;
-}
-
-TargetImage findTargetImage() noexcept {
-    TargetImage image{};
-    dl_iterate_phdr(
-        [](dl_phdr_info* info, std::size_t, void* opaque) -> int {
-            auto& out = *static_cast<TargetImage*>(opaque);
-            if (inspectBuildId(info, out)) {
-                return out.buildIdValid ? 1 : 0;
-            }
-            return 0;
-        },
-        &image);
-    return image;
-}
-
-bool validateClientInstanceVtable(const TargetImage& image) noexcept {
-    if (!image.base || !image.buildIdValid) {
-        return false;
-    }
-
-    auto** vtable = reinterpret_cast<void**>(image.base + TargetLayout::clientInstanceVtable);
-    const auto offsetToTop = reinterpret_cast<std::uintptr_t>(vtable[-2]);
-    const auto typeInfo = reinterpret_cast<std::uintptr_t>(vtable[-1]);
-    if (offsetToTop != 0 || typeInfo != image.base + TargetLayout::clientInstanceTypeInfo) {
-        return false;
-    }
-
-    auto* typeInfoWords = reinterpret_cast<const std::uintptr_t*>(typeInfo);
-    if (typeInfoWords[1] != image.base + TargetLayout::clientInstanceTypeName) {
-        return false;
-    }
-
-    const auto* name = reinterpret_cast<const char*>(image.base + TargetLayout::clientInstanceTypeName);
-    if (std::strcmp(name, "14ClientInstance") != 0) {
-        return false;
-    }
-
-    if (reinterpret_cast<std::uintptr_t>(vtable[TargetLayout::updateVtableSlot]) !=
-        image.base + TargetLayout::update) {
-        return false;
-    }
-
-    if (reinterpret_cast<std::uintptr_t>(vtable[TargetLayout::localPlayerVtableSlot]) !=
-        image.base + TargetLayout::localPlayer) {
-        return false;
-    }
-
-    return true;
-}
-
-EntityContextMirror* entityContextFromPlayer(void* player) noexcept {
-    if (!player) {
-        return nullptr;
-    }
-    return reinterpret_cast<EntityContextMirror*>(
-        reinterpret_cast<std::uintptr_t>(player) + TargetLayout::actorEntityContextOffset);
-}
-
-Registry* registryFromPlayer(void* player) noexcept {
-    const auto* context = entityContextFromPlayer(player);
-    if (!context || !context->mEnTTRegistry) {
-        return nullptr;
-    }
-    return reinterpret_cast<Registry*>(context->mEnTTRegistry);
-}
+constexpr std::string_view kDebugModuleId = levi_freecam::debug::kModuleId;
 
 constexpr std::string_view kFreecamSvg = R"svg(
 <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
@@ -246,68 +50,87 @@ public:
 
     bool load() {
         mNativeMod = ll::mod::NativeMod::current();
-        if (!mNativeMod) {
-            return false;
-        }
-
+        if (!mNativeMod) return false;
         g_mod = this;
-        mNativeMod->getLogger().info("Freecam {} loaded; waiting for Minecraft", kMinecraftVersion);
-        // LeviLaunchroid loads native mods before libminecraftpe.so is necessarily
-        // present. Runtime hook installation therefore cannot be a load() failure.
+        mDebug.bind(mNativeMod);
+        mNativeMod->getLogger().info("Freecam {} loaded; waiting for Minecraft", levi_freecam::target::kMinecraftVersion);
         return true;
     }
 
     bool enable() {
-        if (!mNativeMod) {
+        if (!mNativeMod) return false;
+        auto& logger = mNativeMod->getLogger();
+
+        pl::modmenu::ModuleInfo debugModule{};
+        debugModule.moduleId = std::string{kDebugModuleId};
+        debugModule.displayName = "Freecam Debug";
+        debugModule.description = "Diagnostic logging for hook, lifecycle, player, ECS and camera state.";
+        debugModule.modId = mNativeMod->getId();
+        debugModule.defaultEnabled = false;
+        debugModule.configs.push_back(pl::modmenu::ConfigEntry{
+            .key = "level",
+            .displayName = "Debug Level",
+            .type = pl::modmenu::ConfigType::SliderInt,
+            .defaultValue = "2",
+            .minValue = "0",
+            .maxValue = "4",
+        });
+        debugModule.onToggle = [this](std::string_view, bool enabled) {
+            mDebug.setEnabled(enabled);
+            if (mNativeMod) mNativeMod->getLogger().info("Freecam debug module: {}", enabled ? "ON" : "OFF");
+        };
+        debugModule.onConfigChanged = [this](std::string_view, std::string_view key, std::string_view value) {
+            if (key != "level") return;
+            int level = 2;
+            try { level = std::stoi(std::string{value}); } catch (...) {}
+            mDebug.setConfiguredLevel(level);
+            if (mNativeMod) mNativeMod->getLogger().info("Freecam debug level = {}", level);
+        };
+        if (!pl::modmenu::registerModule(debugModule)) {
+            logger.error("Freecam Debug module registration failed");
             return false;
         }
 
-        auto& logger = mNativeMod->getLogger();
         pl::modmenu::ModuleInfo module{};
         module.moduleId = std::string{kModuleId};
         module.displayName = "Freecam";
-        module.description =
-            "Native debug camera. The real player is not teleported or switched to spectator.";
+        module.description = "Native debug camera. The real player is not teleported or switched to spectator.";
         module.modId = mNativeMod->getId();
         module.defaultEnabled = true;
-        module.hideInHudEditor = false;
         module.configs.push_back(pl::modmenu::ConfigEntry{
             .key = "enabled",
             .displayName = "Enabled",
             .type = pl::modmenu::ConfigType::Toggle,
             .defaultValue = "true",
         });
-        module.onToggle = [this](std::string_view, bool enabled) {
-            setMenuEnabled(enabled);
-        };
-        module.onConfigChanged = [this](std::string_view, std::string_view key,
-                                        std::string_view value) {
-            if (key != "enabled") {
-                return;
-            }
+        module.onToggle = [this](std::string_view, bool enabled) { setMenuEnabled(enabled); };
+        module.onConfigChanged = [this](std::string_view, std::string_view key, std::string_view value) {
+            if (key != "enabled") return;
             const bool enabled = value == "true" || value == "1";
             mConfigEnabled.store(enabled, std::memory_order_release);
             request(mMenuEnabled.load(std::memory_order_acquire) && enabled);
-            if (mNativeMod) {
-                mNativeMod->getLogger().info("Freecam setting: enabled = {}", enabled);
-            }
+            if (mNativeMod) mNativeMod->getLogger().info("Freecam setting: enabled = {}", enabled);
         };
-
         if (!pl::modmenu::registerModule(module)) {
-            logger.error("Mod Menu registration failed");
+            logger.error("Freecam Mod Menu registration failed");
+            pl::modmenu::unregisterModule(kDebugModuleId);
             return false;
         }
 
         setMenuEnabled(true);
         startRuntimeWatcher();
         logger.info("Freecam enabled; waiting for ClientInstance::update hook");
+        mDebug.info("Lifecycle enable complete; runtime watcher started");
         return true;
     }
 
     bool disable() {
         request(false);
         pl::modmenu::unregisterButton(kButtonId);
+        pl::modmenu::unregisterModule(kDebugModuleId);
+        pl::modmenu::unregisterModule(kModuleId);
         mMenuEnabled.store(false, std::memory_order_release);
+        mDebug.setEnabled(false);
         return true;
     }
 
@@ -315,8 +138,10 @@ public:
         request(false);
         stopRuntimeWatcher();
         pl::modmenu::unregisterButton(kButtonId);
+        pl::modmenu::unregisterModule(kDebugModuleId);
         pl::modmenu::unregisterModule(kModuleId);
         mMenuEnabled.store(false, std::memory_order_release);
+        mDebug.setEnabled(false);
         g_mod = nullptr;
         mUpdateHook.reset();
         g_originalUpdate = nullptr;
@@ -330,17 +155,13 @@ public:
     }
 
     bool onClientUpdate(void* clientInstance) noexcept {
-        try {
-            return onClientUpdateImpl(clientInstance);
-        } catch (...) {
-            // Never allow an unexpected exception to cross the Minecraft hook boundary.
-            // In particular, EnTT context construction/removal can allocate and therefore
-            // may throw on memory pressure. Disable the request and forget ownership; the
-            // registry itself remains owned by the game and will clean up its global state.
+        try { return onClientUpdateImpl(clientInstance); }
+        catch (...) {
             mRequested.store(false, std::memory_order_release);
             mOwnedRegistry = nullptr;
             mOwnedActive = false;
             mBoundPlayer = nullptr;
+            mDebug.error("Exception escaped update processing; request was disabled");
             return false;
         }
     }
@@ -348,111 +169,99 @@ public:
 private:
     void startRuntimeWatcher() {
         bool expected = false;
-        if (!mWatcherRunning.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
-            return;
-        }
+        if (!mWatcherRunning.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) return;
         mStopWatcher.store(false, std::memory_order_release);
         mWatcher = std::thread([this] {
+            mDebug.verbose("Runtime watcher started");
             for (;;) {
-                if (mStopWatcher.load(std::memory_order_acquire)) {
-                    return;
-                }
-                if (installRuntimeHook()) {
-                    return;
-                }
+                if (mStopWatcher.load(std::memory_order_acquire)) return;
+                if (installRuntimeHook()) return;
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
             }
         });
     }
 
     bool installRuntimeHook() {
-        if (mUpdateHook.installed()) {
-            return true;
-        }
-
-        mTarget = findTargetImage();
+        if (mUpdateHook.installed()) return true;
+        mTarget = levi_freecam::target::find();
         if (!mTarget.base) {
+            mDebug.trace("Target library not present yet");
             return false;
         }
         if (!mTarget.buildIdValid) {
-            if (!mLoggedBuildMismatch.exchange(true, std::memory_order_acq_rel) && mNativeMod) {
-                mNativeMod->getLogger().error(
-                    "Minecraft Build ID mismatch; expected 1.26.52.3 (56de9eed...71d335)");
+            if (!mLoggedBuildMismatch.exchange(true, std::memory_order_acq_rel)) {
+                mDebug.error("Minecraft Build ID mismatch; expected 1.26.52.3");
             }
             return false;
         }
-        if (!validateClientInstanceVtable(mTarget)) {
-            if (!mLoggedAbiMismatch.exchange(true, std::memory_order_acq_rel) && mNativeMod) {
-                mNativeMod->getLogger().error("ClientInstance ABI validation failed; hook skipped");
+        mDebug.verbose("Minecraft Build ID matched 1.26.52.3");
+        mDebug.verbose("Target image base = " + std::to_string(mTarget.base));
+        if (!levi_freecam::target::validateClientInstanceVtable(mTarget)) {
+            if (!mLoggedAbiMismatch.exchange(true, std::memory_order_acq_rel)) {
+                mDebug.error("ClientInstance ABI validation failed; hook skipped");
             }
             return false;
         }
+        mDebug.verbose("ClientInstance RTTI/vtable validation passed");
+        mDebug.verbose("ClientInstance::update RVA = " + std::to_string(levi_freecam::target::Layout::update));
 
-        auto* target = reinterpret_cast<void*>(mTarget.base + TargetLayout::update);
+        auto* target = reinterpret_cast<void*>(mTarget.base + levi_freecam::target::Layout::update);
+        mDebug.verbose("Installing ClientInstance::update hook");
         mUpdateHook = pl::memory::HookHandle(
-            target,
-            reinterpret_cast<void*>(&updateDetour),
-            reinterpret_cast<void**>(&g_originalUpdate),
+            target, reinterpret_cast<void*>(&updateDetour), reinterpret_cast<void**>(&g_originalUpdate),
             pl::memory::HookPriority::High);
-
         if (!mUpdateHook.installed() || !g_originalUpdate) {
-            if (!mLoggedHookFailure.exchange(true, std::memory_order_acq_rel) && mNativeMod) {
-                mNativeMod->getLogger().error("ClientInstance::update hook installation failed");
+            if (!mLoggedHookFailure.exchange(true, std::memory_order_acq_rel)) {
+                mDebug.error("ClientInstance::update hook installation failed");
             }
             mUpdateHook.reset();
             g_originalUpdate = nullptr;
             return false;
         }
-
-        if (mNativeMod) {
-            mNativeMod->getLogger().info("ClientInstance::update hook installed");
-        }
+        mDebug.info("ClientInstance::update hook installed");
         return true;
     }
 
     void stopRuntimeWatcher() {
         mStopWatcher.store(true, std::memory_order_release);
-        if (mWatcher.joinable()) {
-            mWatcher.join();
-        }
+        if (mWatcher.joinable()) mWatcher.join();
         mWatcherRunning.store(false, std::memory_order_release);
+        mDebug.verbose("Runtime watcher stopped");
     }
 
     bool onClientUpdateImpl(void* clientInstance) {
+        ++mUpdateCount;
+        mDebug.trace("update begin");
         if (!clientInstance) {
+            mDebug.verbose("update skipped: ClientInstance is null");
             return false;
         }
 
-        // Re-check the object vtable. This is cheap and makes a stale/foreign object
-        // fail closed rather than turning an ABI mismatch into an arbitrary call.
         auto** vtable = *reinterpret_cast<void***>(clientInstance);
         if (!vtable) {
+            mDebug.error("update skipped: ClientInstance vtable is null");
+            return false;
+        }
+        const auto updateEntry = reinterpret_cast<std::uintptr_t>(vtable[levi_freecam::target::Layout::updateVtableSlot]);
+        const auto localPlayerEntry = reinterpret_cast<std::uintptr_t>(vtable[levi_freecam::target::Layout::localPlayerVtableSlot]);
+        if (updateEntry != mTarget.base + levi_freecam::target::Layout::update ||
+            localPlayerEntry != mTarget.base + levi_freecam::target::Layout::localPlayer) {
+            mDebug.error("update skipped: live ClientInstance vtable does not match target ABI");
             return false;
         }
 
-        const auto updateEntry = reinterpret_cast<std::uintptr_t>(
-            vtable[TargetLayout::updateVtableSlot]);
-        const auto localPlayerEntry = reinterpret_cast<std::uintptr_t>(
-            vtable[TargetLayout::localPlayerVtableSlot]);
-        if (updateEntry != mTarget.base + TargetLayout::update ||
-            localPlayerEntry != mTarget.base + TargetLayout::localPlayer) {
-            return false;
-        }
-
-        const auto requested = mRequested.load(std::memory_order_acquire);
+        const bool requested = mRequested.load(std::memory_order_acquire);
         if (!requested && !mOwnedActive) {
+            mDebug.trace("update: freecam idle");
             return true;
         }
 
-        auto* getLocalPlayer = reinterpret_cast<GetLocalPlayerFn>(
-            mTarget.base + TargetLayout::localPlayer);
+        mDebug.verbose("update: request active; resolving local player");
+        auto* getLocalPlayer = reinterpret_cast<GetLocalPlayerFn>(mTarget.base + levi_freecam::target::Layout::localPlayer);
         void* player = getLocalPlayer(clientInstance);
-        Registry* registry = registryFromPlayer(player);
-
         if (!player) {
-            if (mBoundPlayer || mOwnedRegistry) {
-                mRequested.store(false, std::memory_order_release);
-            }
+            mDebug.verbose("update: local player unavailable; disabling request");
+            mRequested.store(false, std::memory_order_release);
             mBoundPlayer = nullptr;
             mOwnedRegistry = nullptr;
             mOwnedActive = false;
@@ -460,24 +269,24 @@ private:
         }
 
         if (mBoundPlayer && mBoundPlayer != player) {
-            // Player replacement is treated as a world/session boundary. Do not touch
-            // the old registry after replacement; it may already be destructing.
+            mDebug.info("update: local player changed; rebinding disabled until next request");
             mBoundPlayer = nullptr;
             mOwnedRegistry = nullptr;
             mOwnedActive = false;
             mRequested.store(false, std::memory_order_release);
         }
 
+        mDebug.verbose("update: local player pointer = " + std::to_string(reinterpret_cast<std::uintptr_t>(player)));
+        auto* registry = levi_freecam::ecs::registryFromPlayer(player, levi_freecam::target::Layout::actorEntityContextOffset);
         if (mOwnedRegistry && registry != mOwnedRegistry) {
-            // Dimension/world registry changed. The old global component belonged to the
-            // old registry and will be destroyed with it. Freecam is auto-disabled.
+            mDebug.info("update: ECS registry changed; dropping old ownership");
             mOwnedRegistry = nullptr;
             mOwnedActive = false;
             mBoundPlayer = nullptr;
             mRequested.store(false, std::memory_order_release);
         }
-
         if (!registry) {
+            mDebug.error("update: local player ECS registry is null");
             mBoundPlayer = nullptr;
             mOwnedRegistry = nullptr;
             mOwnedActive = false;
@@ -486,9 +295,8 @@ private:
         }
 
         if (mBoundPlayer != player || mLastRegistry != registry) {
-            if (mNativeMod) {
-                mNativeMod->getLogger().info("Freecam bound to local-player ECS registry");
-            }
+            mDebug.info("update: bound to local-player ECS registry");
+            mDebug.verbose("update: registry pointer = " + std::to_string(reinterpret_cast<std::uintptr_t>(registry)));
             mLastRegistry = registry;
         }
 
@@ -497,12 +305,8 @@ private:
 
         if (!mRequested.load(std::memory_order_acquire)) {
             if (mOwnedActive && mOwnedRegistry == registry) {
-                // Only erase state this mod inserted. If vanilla or another mod already
-                // owned the component, leaving it untouched is required for correctness.
+                mDebug.info("update: erasing mod-owned DebugCameraIsActiveComponent");
                 globals.erase<DebugCameraState>();
-                if (mNativeMod) {
-                    mNativeMod->getLogger().info("Freecam debug-camera state removed");
-                }
             }
             mOwnedActive = false;
             mOwnedRegistry = nullptr;
@@ -510,47 +314,36 @@ private:
             return true;
         }
 
-        if (!globals.contains<DebugCameraState>()) {
+        const bool alreadyActive = globals.contains<DebugCameraState>();
+        mDebug.verbose(alreadyActive
+            ? "update: DebugCameraIsActiveComponent already exists"
+            : "update: DebugCameraIsActiveComponent absent; emplacing");
+        if (!alreadyActive) {
             globals.emplace<DebugCameraState>();
             mOwnedActive = true;
             mOwnedRegistry = registry;
-            if (mNativeMod) {
-                mNativeMod->getLogger().info("Freecam debug-camera state enabled");
-            }
+            mDebug.info("update: debug-camera global state enabled");
         } else {
-            // Vanilla/native debug camera is already active. Do not claim ownership and
-            // never remove another owner’s component when this mod is disabled.
             mOwnedActive = false;
             mOwnedRegistry = registry;
+            mDebug.trace("update: debug-camera state already exists");
         }
         mBoundPlayer = player;
+        mDebug.trace("update end: ECS state processed");
         return true;
     }
 
-    FreecamModImpl() = default;
-    ~FreecamModImpl() = default;
-
-    void request(bool enabled) noexcept {
-        mRequested.store(enabled, std::memory_order_release);
-    }
+    void request(bool enabled) noexcept { mRequested.store(enabled, std::memory_order_release); }
 
     void setMenuEnabled(bool enabled) {
         mMenuEnabled.store(enabled, std::memory_order_release);
         request(enabled && mConfigEnabled.load(std::memory_order_acquire));
         pl::modmenu::unregisterButton(kButtonId);
-
         if (!enabled) {
-            if (mNativeMod) {
-                mNativeMod->getLogger().info("Freecam module disabled");
-            }
+            if (mNativeMod) mNativeMod->getLogger().info("Freecam module disabled");
             return;
         }
-
-        if (mNativeMod) {
-            mNativeMod->getLogger().info(
-                "Freecam module enabled; Freecam setting = {}",
-                mConfigEnabled.load(std::memory_order_acquire));
-        }
+        if (mNativeMod) mNativeMod->getLogger().info("Freecam module enabled; setting = {}", mConfigEnabled.load());
 
         pl::modmenu::ButtonInfo button{};
         button.buttonId = std::string{kButtonId};
@@ -565,30 +358,22 @@ private:
         button.heightScale = 1.0f;
         button.iconFormat = pl::modmenu::ButtonIconFormat::Svg;
         button.hideLabelWhenIconPresent = true;
-
-        const auto* svg = reinterpret_cast<const unsigned char*>(kFreecamSvg.data());
-        button.iconData.assign(svg, svg + kFreecamSvg.size());
-        const auto* activeSvg = reinterpret_cast<const unsigned char*>(kFreecamActiveSvg.data());
-        button.activeIconData.assign(activeSvg, activeSvg + kFreecamActiveSvg.size());
-
+        button.iconData.assign(reinterpret_cast<const unsigned char*>(kFreecamSvg.data()),
+                               reinterpret_cast<const unsigned char*>(kFreecamSvg.data()) + kFreecamSvg.size());
+        button.activeIconData.assign(reinterpret_cast<const unsigned char*>(kFreecamActiveSvg.data()),
+                                     reinterpret_cast<const unsigned char*>(kFreecamActiveSvg.data()) + kFreecamActiveSvg.size());
         button.onEvent = [this](std::string_view, pl::modmenu::ButtonEvent event, float value) {
-            if (event != pl::modmenu::ButtonEvent::StateChanged) {
-                return;
-            }
-            const bool enabled = value > 0.5f;
-            request(enabled && mConfigEnabled.load(std::memory_order_acquire));
-            if (mNativeMod) {
-                mNativeMod->getLogger().info("Freecam button: {}", enabled ? "ON" : "OFF");
-            }
+            if (event != pl::modmenu::ButtonEvent::StateChanged) return;
+            const bool enabledNow = value > 0.5f;
+            request(enabledNow && mConfigEnabled.load(std::memory_order_acquire));
+            if (mNativeMod) mNativeMod->getLogger().info("Freecam button: {}", enabledNow ? "ON" : "OFF");
+            mDebug.verbose(enabledNow ? "HUD button requested ON" : "HUD button requested OFF");
         };
-
-        if (!pl::modmenu::registerButton(button) && mNativeMod) {
-            mNativeMod->getLogger().warn("Failed to register Freecam HUD button");
-        }
+        if (!pl::modmenu::registerButton(button) && mNativeMod) mNativeMod->getLogger().warn("Failed to register Freecam HUD button");
     }
 
     ll::mod::NativeMod* mNativeMod{};
-    TargetImage mTarget{};
+    levi_freecam::target::Image mTarget{};
     pl::memory::HookHandle mUpdateHook{};
     std::thread mWatcher{};
     std::atomic_bool mWatcherRunning{false};
@@ -596,35 +381,25 @@ private:
     std::atomic_bool mLoggedBuildMismatch{false};
     std::atomic_bool mLoggedAbiMismatch{false};
     std::atomic_bool mLoggedHookFailure{false};
-
     std::atomic_bool mMenuEnabled{false};
     std::atomic_bool mConfigEnabled{true};
     std::atomic_bool mRequested{false};
-
-    Registry* mOwnedRegistry{};
-    Registry* mLastRegistry{};
+    std::uint64_t mUpdateCount{};
+    levi_freecam::ecs::Registry* mOwnedRegistry{};
+    levi_freecam::ecs::Registry* mLastRegistry{};
     void* mBoundPlayer{};
     bool mOwnedActive{};
+    levi_freecam::debug::Controller mDebug{};
 };
 
 bool updateDetour(void* self, bool isInitFinished) noexcept {
-    if (g_mod) {
-        try {
-            (void)g_mod->onClientUpdate(self);
-        } catch (...) {
-            // onClientUpdate() is itself exception-safe; this guard prevents a future
-            // callback/lifecycle edit from ever propagating through the native hook ABI.
-        }
-    }
-    return g_originalUpdate
-        ? g_originalUpdate(self, isInitFinished)
-        : false;
+    if (g_mod) (void)g_mod->onClientUpdate(self);
+    return g_originalUpdate ? g_originalUpdate(self, isInitFinished) : false;
 }
 
 } // namespace
 
 export namespace levi_freecam {
-
 class FreecamMod {
 public:
     static FreecamMod& instance();
@@ -633,35 +408,14 @@ public:
     bool disable();
     bool unload();
 };
-
-} // namespace levi_freecam
+}
 
 namespace levi_freecam {
-
-FreecamMod& FreecamMod::instance() {
-    static FreecamMod value;
-    return value;
+FreecamMod& FreecamMod::instance() { static FreecamMod value; return value; }
+bool FreecamMod::load() { return FreecamModImpl::instance().load(); }
+bool FreecamMod::enable() { return FreecamModImpl::instance().enable(); }
+bool FreecamMod::disable() { return FreecamModImpl::instance().disable(); }
+bool FreecamMod::unload() { return FreecamModImpl::instance().unload(); }
 }
 
-bool FreecamMod::load() {
-    return FreecamModImpl::instance().load();
-}
-
-bool FreecamMod::enable() {
-    return FreecamModImpl::instance().enable();
-}
-
-bool FreecamMod::disable() {
-    return FreecamModImpl::instance().disable();
-}
-
-bool FreecamMod::unload() {
-    return FreecamModImpl::instance().unload();
-}
-
-} // namespace levi_freecam
-
-// Keep registration in this module unit. A separate TU that imports this module
-// and then includes pl/Mod.hpp triggers a known Clang/libc++ global-module-fragment
-// ODR diagnostic with the Android NDK libc++ headers.
 PL_REGISTER_MOD(levi_freecam::FreecamMod, levi_freecam::FreecamMod::instance());

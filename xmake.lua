@@ -3,6 +3,8 @@ set_policy("package.requires_lock", true)
 set_policy("build.c++.modules", true)
 set_xmakever("3.1.1")
 
+-- BedrockTools uses the same Xmake/preloader dependency boundary.  We adopt that
+-- boundary here instead of copying its project sources.
 package("preloader")
     set_homepage("https://github.com/LiteLDev/preloader-android")
     set_description("Preloader Android")
@@ -23,8 +25,7 @@ target("levi_freecam")
     set_runtimes("c++_shared")
     set_languages("c++23")
     set_strip("all")
-    add_files("src/freecam.cppm")
-    add_includedirs("src", {public = false})
+    add_files("src/freecam.cppm", "src/freecam/*.cppm")
     add_packages("preloader", "entt", "fmt")
 
     if is_plat("android") then

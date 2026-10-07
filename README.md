@@ -126,3 +126,27 @@ Xmake retrieves the Levi Android preloader through its normal CMake package help
 ## C++ runtime
 
 The mod uses `c++_shared`, matching the Android preloader runtime boundary.
+
+## Debug module
+
+`Freecam Debug` is a separate Mod Menu module and is **off by default**. Enable it only while diagnosing the native runtime.
+
+| Level | Meaning |
+|---:|---|
+| 0 | Off |
+| 1 | Errors only |
+| 2 | Lifecycle and state transitions |
+| 3 | Hook, player, registry and ECS processing |
+| 4 | Trace: every `ClientInstance::update` processing step |
+
+The diagnostic path reports, in order: Minecraft library discovery, exact Build ID validation, ClientInstance RTTI/vtable validation, hook installation, ClientInstance validation on the live object, local-player resolution, EntityContext/ECS registry binding, request state, `DebugCameraIsActiveComponent` lookup, insertion/removal, and lifecycle/world/player changes.
+
+Use level 4 only for short reproduction windows because it logs every hooked update.
+
+## GitHub downloads
+
+Tagged builds publish the complete `.levipack` as a GitHub Release asset. The workflow prints the direct installer URL in the job summary:
+
+`https://github.com/<owner>/<repo>/releases/download/<tag>/levi_freecam.levipack`
+
+Replace `<tag>` with the published tag, for example `v1.0.0`.

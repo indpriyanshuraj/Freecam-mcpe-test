@@ -1,22 +1,30 @@
 # Implementation notes
 
-The native implementation is kept in `src/freecam.cppm` as a C++23 module unit. Mod registration is kept in that same unit so no translation unit imports the module and then includes Preloader headers. Xmake's C++ module dependency analysis is enabled explicitly.
+## Source layout
 
-The Android build intentionally follows the BedrockTools workflow rather than introducing a separate CMake build orchestration layer. The preloader dependency is built through Xmake's standard CMake package helper, and EnTT `v4.0.0` is consumed as a package.
-
-For Termux, set `ANDROID_NDK_HOME` and run:
-
-```sh
-./scripts/build.sh release
+```text
+src/
+├── freecam.cppm             # lifecycle, Mod Menu, hook/runtime orchestration
+└── freecam/
+    ├── debug.cppm           # separate diagnostic module + selectable log level
+    ├── ecs.cppm             # exact EntityId/EntityContext/EnTT mirror
+    └── target.cppm          # 1.26.52.3 Build ID + ClientInstance ABI gate
 ```
 
-The script is only a thin wrapper around the same Xmake configure/build commands used by CI.
+The project does not copy BedrockTools sources. Its Xmake dependency boundary is adopted from BedrockTools: Xmake, Android preloader package, EnTT and fmt.
 
+## Diagnostic levels
 
-## ModMenu state
+The `levi_freecam.Debug` module is disabled by default. Its `Debug Level` slider is:
 
-The module exposes an `Enabled` toggle configuration with default value `true`. The HUD button is a Toggle button and receives `StateChanged`; both paths update the same atomic native request. Runtime logs report only state transitions and first ECS binding, not every frame.
+- `0`: Off
+- `1`: Errors
+- `2`: Info/state transitions
+- `3`: Verbose hook/player/ECS processing
+- `4`: Trace, including every update hook pass
 
-## Metadata
+This is intentionally separate from the Freecam module so normal use does not produce per-frame logs.
 
-The packaged manifest identifies the author as `Levi` and version `1.0.0`, targeting Minecraft `1.26.52.3`.
+## Release packaging
+
+CI continues to upload the `.levipack` and `.so` as workflow artifacts. Tagged builds additionally publish both files as GitHub Release assets, so the `.levipack` has a stable direct download URL.
