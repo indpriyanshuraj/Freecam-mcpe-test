@@ -4,7 +4,8 @@ module;
 #include <cstdint>
 #include <string_view>
 
-#include <pl/Mod.hpp>
+#include <android/log.h>
+
 #include <pl/ModMenu.hpp>
 
 export module levi.freecam.debug;
@@ -20,11 +21,10 @@ enum class Level : std::uint8_t {
 };
 
 inline constexpr std::string_view kModuleId = "levi_freecam.Debug";
+inline constexpr const char* kLogTag = "LeviFreecam";
 
 class Controller {
 public:
-    void bind(ll::mod::NativeMod* mod) noexcept { mMod = mod; }
-
     void setConfiguredLevel(int value) noexcept {
         if (value < 0) value = 0;
         if (value > 4) value = 4;
@@ -46,28 +46,43 @@ public:
 
     [[nodiscard]] bool enabled() const noexcept { return level() != Level::Off; }
 
-    void error(std::string_view message) const {
-        if (allows(Level::Error) && mMod) mMod->getLogger().error("[debug] {}", message);
+    void error(std::string_view message) const noexcept {
+        if (!allows(Level::Error)) return;
+        emit(ANDROID_LOG_ERROR, message);
     }
 
-    void info(std::string_view message) const {
-        if (allows(Level::Info) && mMod) mMod->getLogger().info("[debug] {}", message);
+    void info(std::string_view message) const noexcept {
+        if (!allows(Level::Info)) return;
+        emit(ANDROID_LOG_INFO, message);
     }
 
-    void verbose(std::string_view message) const {
-        if (allows(Level::Verbose) && mMod) mMod->getLogger().info("[debug] {}", message);
+    void verbose(std::string_view message) const noexcept {
+        if (!allows(Level::Verbose)) return;
+        emit(ANDROID_LOG_DEBUG, message);
     }
 
-    void trace(std::string_view message) const {
-        if (allows(Level::Trace) && mMod) mMod->getLogger().info("[debug] {}", message);
+    void trace(std::string_view message) const noexcept {
+        if (!allows(Level::Trace)) return;
+        emit(ANDROID_LOG_VERBOSE, message);
+    }
+
+    void always(std::string_view message) const noexcept {
+        emit(ANDROID_LOG_INFO, message);
+    }
+
+    void alwaysError(std::string_view message) const noexcept {
+        emit(ANDROID_LOG_ERROR, message);
     }
 
 private:
+    void emit(int priority, std::string_view message) const noexcept {
+        __android_log_print(priority, kLogTag, "%.*s", static_cast<int>(message.size()), message.data());
+    }
+
     [[nodiscard]] bool allows(Level required) const noexcept {
         return static_cast<unsigned>(level()) >= static_cast<unsigned>(required);
     }
 
-    ll::mod::NativeMod* mMod{};
     std::atomic<Level> mConfiguredLevel{Level::Info};
     std::atomic<Level> mLevel{Level::Off};
     std::atomic_bool mEnabled{false};

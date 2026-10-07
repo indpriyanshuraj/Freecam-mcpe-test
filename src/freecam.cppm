@@ -52,19 +52,16 @@ public:
         mNativeMod = ll::mod::NativeMod::current();
         if (!mNativeMod) return false;
         g_mod = this;
-        mDebug.bind(mNativeMod);
-        mNativeMod->getLogger().info("Freecam {} loaded; waiting for Minecraft", levi_freecam::target::kMinecraftVersion);
+        mDebug.always(std::string{"Freecam "} + std::string{levi_freecam::target::kMinecraftVersion} + " loaded; waiting for Minecraft");
         return true;
     }
 
     bool enable() {
         if (!mNativeMod) return false;
-        auto& logger = mNativeMod->getLogger();
-
         pl::modmenu::ModuleInfo debugModule{};
         debugModule.moduleId = std::string{kDebugModuleId};
         debugModule.displayName = "Freecam Debug";
-        debugModule.description = "Diagnostic logging for hook, lifecycle, player, ECS and camera state.";
+        debugModule.description = "Android logcat diagnostics. Tag: LeviFreecam. Levels 0-4 control detail.";
         debugModule.modId = mNativeMod->getId();
         debugModule.defaultEnabled = false;
         debugModule.configs.push_back(pl::modmenu::ConfigEntry{
@@ -77,17 +74,17 @@ public:
         });
         debugModule.onToggle = [this](std::string_view, bool enabled) {
             mDebug.setEnabled(enabled);
-            if (mNativeMod) mNativeMod->getLogger().info("Freecam debug module: {}", enabled ? "ON" : "OFF");
+            mDebug.info(std::string{"Freecam debug module: "} + (enabled ? "ON" : "OFF"));
         };
         debugModule.onConfigChanged = [this](std::string_view, std::string_view key, std::string_view value) {
             if (key != "level") return;
             int level = 2;
             try { level = std::stoi(std::string{value}); } catch (...) {}
             mDebug.setConfiguredLevel(level);
-            if (mNativeMod) mNativeMod->getLogger().info("Freecam debug level = {}", level);
+            mDebug.info(std::string{"Freecam debug level = "} + std::to_string(level));
         };
         if (!pl::modmenu::registerModule(debugModule)) {
-            logger.error("Freecam Debug module registration failed");
+            mDebug.alwaysError("Freecam Debug module registration failed");
             return false;
         }
 
@@ -109,17 +106,17 @@ public:
             const bool enabled = value == "true" || value == "1";
             mConfigEnabled.store(enabled, std::memory_order_release);
             request(mMenuEnabled.load(std::memory_order_acquire) && enabled);
-            if (mNativeMod) mNativeMod->getLogger().info("Freecam setting: enabled = {}", enabled);
+            mDebug.info(std::string{"Freecam setting: enabled = "} + (enabled ? "true" : "false"));
         };
         if (!pl::modmenu::registerModule(module)) {
-            logger.error("Freecam Mod Menu registration failed");
+            mDebug.alwaysError("Freecam Mod Menu registration failed");
             pl::modmenu::unregisterModule(kDebugModuleId);
             return false;
         }
 
         setMenuEnabled(true);
         startRuntimeWatcher();
-        logger.info("Freecam enabled; waiting for ClientInstance::update hook");
+        mDebug.always("Freecam enabled; waiting for ClientInstance::update hook");
         mDebug.info("Lifecycle enable complete; runtime watcher started");
         return true;
     }
@@ -340,10 +337,10 @@ private:
         request(enabled && mConfigEnabled.load(std::memory_order_acquire));
         pl::modmenu::unregisterButton(kButtonId);
         if (!enabled) {
-            if (mNativeMod) mNativeMod->getLogger().info("Freecam module disabled");
+            mDebug.always("Freecam module disabled");
             return;
         }
-        if (mNativeMod) mNativeMod->getLogger().info("Freecam module enabled; setting = {}", mConfigEnabled.load());
+        mDebug.always(std::string{"Freecam module enabled; setting = "} + (mConfigEnabled.load() ? "true" : "false"));
 
         pl::modmenu::ButtonInfo button{};
         button.buttonId = std::string{kButtonId};
@@ -366,10 +363,10 @@ private:
             if (event != pl::modmenu::ButtonEvent::StateChanged) return;
             const bool enabledNow = value > 0.5f;
             request(enabledNow && mConfigEnabled.load(std::memory_order_acquire));
-            if (mNativeMod) mNativeMod->getLogger().info("Freecam button: {}", enabledNow ? "ON" : "OFF");
+            mDebug.info(std::string{"Freecam button: "} + (enabledNow ? "ON" : "OFF"));
             mDebug.verbose(enabledNow ? "HUD button requested ON" : "HUD button requested OFF");
         };
-        if (!pl::modmenu::registerButton(button) && mNativeMod) mNativeMod->getLogger().warn("Failed to register Freecam HUD button");
+        if (!pl::modmenu::registerButton(button)) mDebug.alwaysError("Failed to register Freecam HUD button");
     }
 
     ll::mod::NativeMod* mNativeMod{};

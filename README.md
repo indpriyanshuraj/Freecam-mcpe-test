@@ -175,3 +175,35 @@ GitHub Actions uses `debug` for normal commits, pull requests, and manual runs. 
 - `4` — Trace, including every client update
 
 Use level 4 when diagnosing a device where the Freecam button is visible but native camera state does not change.
+
+
+## Debugging
+
+The optional **Freecam Debug** Mod Menu module controls diagnostic logging. It is disabled by default.
+
+| Level | Meaning |
+|---:|---|
+| 0 | Off |
+| 1 | Errors |
+| 2 | Lifecycle/state information |
+| 3 | Hook, player and ECS processing |
+| 4 | Full per-update trace |
+
+All Freecam diagnostics use the Android logcat tag `LeviFreecam`. This is intentionally a single stable tag so logs can be isolated from Minecraft and LeviLaunchroid noise.
+
+With ADB:
+
+```bash
+adb logcat -s LeviFreecam:V *:S
+```
+
+For only errors:
+
+```bash
+adb logcat -s LeviFreecam:E *:S
+```
+
+LeviLaunchroid's in-app logcat overlay can also be filtered with `LeviFreecam`.
+
+When diagnosing a non-working build, enable **Freecam Debug**, select level **4**, restart/enter the world if necessary, then toggle Freecam once. The trace should show the complete path from target discovery through `ClientInstance::update`, local-player lookup, ECS registry binding, and `DebugCameraIsActiveComponent` insertion/removal.
+

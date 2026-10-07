@@ -28,3 +28,8 @@ This is intentionally separate from the Freecam module so normal use does not pr
 ## Release packaging
 
 CI continues to upload the `.levipack` and `.so` as workflow artifacts. Tagged builds additionally publish both files as GitHub Release assets, so the `.levipack` has a stable direct download URL.
+
+
+## Android diagnostics
+
+Runtime diagnostics are emitted through `__android_log_print` with the stable tag `LeviFreecam`. The Mod Menu debug module controls the verbosity. The project also links Android's `log` library explicitly. This keeps diagnostics visible in LeviLaunchroid's logcat overlay and allows `adb logcat -s LeviFreecam:V *:S` filtering.
