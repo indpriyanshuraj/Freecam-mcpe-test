@@ -29,3 +29,12 @@ Target ELF Build ID:
 ## Important limitation
 
 The native component path is RE-backed but still requires real-device behavioral confirmation that the exact `1.26.52.3` debug-camera systems consume only this global state for the desired freecam behavior. The new debug module is intended to distinguish a UI/request/hook/ECS failure from a camera-state implementation failure.
+
+
+## Build/debug fixes
+
+- Fixed C++23 module error caused by `export using` nested inside an exported namespace.
+- Disabled Xmake `build.c++.modules.std` because this project does not import `std`; this prevents the Android NDK build from searching for `libc++.modules.json`.
+- CI now builds `debug` for non-tag commits/PRs and `release` for `v*` tags.
+- CI artifacts contain the matching `.levipack` and `.so` for both modes.
+- Tagged builds publish a direct `.levipack` GitHub Release download.

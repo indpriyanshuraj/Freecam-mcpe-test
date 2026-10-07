@@ -150,3 +150,28 @@ Tagged builds publish the complete `.levipack` as a GitHub Release asset. The wo
 `https://github.com/<owner>/<repo>/releases/download/<tag>/levi_freecam.levipack`
 
 Replace `<tag>` with the published tag, for example `v1.0.0`.
+
+
+## Build modes
+
+The project supports both Xmake build modes:
+
+```text
+scripts/build.sh debug
+scripts/build.sh release
+scripts/build.sh clean
+```
+
+GitHub Actions uses `debug` for normal commits, pull requests, and manual runs. A pushed `v*` tag uses `release` and publishes `levi_freecam.levipack` as a GitHub Release asset with a direct download URL.
+
+## Debug module
+
+`Freecam Debug` is a separate Mod Menu module and is disabled by default. Its `Debug Level` is:
+
+- `0` — Off
+- `1` — Errors
+- `2` — Lifecycle/state changes
+- `3` — Hook/player/ECS processing
+- `4` — Trace, including every client update
+
+Use level 4 when diagnosing a device where the Freecam button is visible but native camera state does not change.

@@ -35,7 +35,7 @@ static_assert(offsetof(EntityContextMirror, mEntity) == 0x10);
 static_assert(entt::type_hash<DebugCameraIsActiveComponent>::value() == 0x25D8BF40u);
 
 export namespace levi_freecam::ecs {
-export using Registry = entt::basic_registry<EntityId>;
+using Registry = entt::basic_registry<EntityId>;
 
 inline EntityContextMirror* contextFromPlayer(void* player, std::uintptr_t offset) noexcept {
     if (!player) return nullptr;

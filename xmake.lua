@@ -1,6 +1,10 @@
 add_rules("mode.debug", "mode.release")
 set_policy("package.requires_lock", true)
 set_policy("build.c++.modules", true)
+-- This project uses named modules but never imports the C++ standard library module.
+-- Disable Xmake's automatic std-module discovery so Android NDK builds do not
+-- look for libc++.modules.json, which is not shipped by the NDK toolchain.
+set_policy("build.c++.modules.std", false)
 set_xmakever("3.1.1")
 
 -- BedrockTools uses the same Xmake/preloader dependency boundary.  We adopt that

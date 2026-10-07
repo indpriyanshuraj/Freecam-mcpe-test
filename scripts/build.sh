@@ -2,13 +2,18 @@
 set -euo pipefail
 
 MODE="${1:-release}"
-NDK="${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-}}"
 
 if [[ "$MODE" == "clean" ]]; then
     echo "== Levi Freecam clean =="
     xmake clean -y
     exit 0
 fi
+
+if [[ "$MODE" != "debug" && "$MODE" != "release" ]]; then
+    echo "Usage: $0 [debug|release|clean]" >&2
+    exit 2
+fi
+NDK="${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-}}"
 
 if [[ -z "$NDK" ]]; then
     echo "Set ANDROID_NDK_HOME (or ANDROID_NDK_ROOT) to an Android NDK." >&2
